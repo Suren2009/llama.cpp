@@ -105,12 +105,53 @@ public final class JavaApiSampleActivity extends AppCompatActivity {
         decodeButton.setOnClickListener(v -> decode());
         releaseButton.setOnClickListener(v -> releaseModel());
 
+        setupDefaultFiles();
         updateButtons();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        setupDefaultFiles();
+    }
+
+    private void setupDefaultFiles() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            if (!android.os.Environment.isExternalStorageManager()) {
+                return;
+            }
+        }
+        File externalStorage = android.os.Environment.getExternalStorageDirectory();
+        File defaultModel = new File(externalStorage, "Download/sse/ranker-gguf/base_model.gguf");
+        File defaultLora = new File(externalStorage, "Download/sse/ranker-gguf/ranker_lora_adapter.gguf");
+
+        if (defaultModel.exists()) {
+            modelFile = defaultModel;
+            modelPathView.setText(modelFile.getAbsolutePath());
+        }
+        if (defaultLora.exists()) {
+            loraFile = defaultLora;
+            loraPathView.setText(loraFile.getAbsolutePath());
+        }
+    }
+
     private void loadModel() {
-        if (modelFile == null) {
-            setStatus("Select a GGUF model first.");
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            if (!android.os.Environment.isExternalStorageManager()) {
+                setStatus("Requesting All Files Access permission...");
+                android.content.Intent intent = new android.content.Intent(
+                        android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:" + getPackageName())
+                );
+                startActivity(intent);
+                return;
+            }
+        }
+
+        setupDefaultFiles();
+
+        if (modelFile == null || !modelFile.exists()) {
+            setStatus("Select a GGUF model first or place it in Download/sse/ranker-gguf/base_model.gguf.");
             return;
         }
 

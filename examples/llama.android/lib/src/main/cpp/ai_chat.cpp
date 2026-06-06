@@ -825,11 +825,8 @@ Java_com_arm_aichat_LlamaAndroid_nativeGetEmbeddings(
         return nullptr;
     }
 
-    if (!llama_model_has_encoder(g_java_model) || llama_model_has_decoder(g_java_model)) {
-        java_throw(env, "java/lang/UnsupportedOperationException",
-                   "Loaded model must be encoder-only to return embeddings");
-        return nullptr;
-    }
+    // Allow BERT and other embedding models to return embeddings.
+    // (Bypassed the too-restrictive check on llama_model_has_encoder && !llama_model_has_decoder)
 
     const std::string input = java_string(env, jinput);
     if (input.empty()) {
