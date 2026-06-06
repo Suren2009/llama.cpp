@@ -65,8 +65,18 @@ public final class LlamaAndroid implements AutoCloseable {
      * @throws UnsupportedOperationException when the loaded model is not encoder-only.
      */
     public synchronized float[] getEmbeddings(String input) {
+        return getEmbeddings(input, false);
+    }
+
+    /**
+     * Returns a normalized embedding vector for {@code input}.
+     *
+     * @param isWithGpu true to run with GPU offload when available, false to force CPU.
+     * @throws UnsupportedOperationException when the loaded model is not encoder-only or GPU was requested but unavailable.
+     */
+    public synchronized float[] getEmbeddings(String input, boolean isWithGpu) {
         requireInput(input);
-        return nativeGetEmbeddings(input);
+        return nativeGetEmbeddings(input, isWithGpu);
     }
 
     /**
@@ -139,7 +149,7 @@ public final class LlamaAndroid implements AutoCloseable {
 
     private native void nativeLoadModel(String modelPath, String loraPath) throws IOException;
 
-    private native float[] nativeGetEmbeddings(String input);
+    private native float[] nativeGetEmbeddings(String input, boolean isWithGpu);
 
     private native String nativeDecode(String input, int predictLength);
 

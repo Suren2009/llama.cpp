@@ -581,6 +581,9 @@ static llama_batch           g_java_batch;
 static bool                  g_java_batch_initialized;
 static common_sampler      * g_java_sampler;
 static llama_adapter_lora  * g_java_lora;
+static std::string           g_java_model_path;
+static std::string           g_java_lora_path;
+static bool                  g_java_use_gpu;
 
 static void java_throw(JNIEnv *env, const char *clazz, const std::string &message) {
     jclass exception_class = env->FindClass(clazz);
@@ -593,6 +596,22 @@ static int java_n_threads() {
     return std::max(N_THREADS_MIN, std::min(N_THREADS_MAX,
                                             (int) sysconf(_SC_NPROCESSORS_ONLN) -
                                             N_THREADS_HEADROOM));
+}
+
+static bool java_supports_gpu_locked() {
+    if (!llama_supports_gpu_offload()) {
+        return false;
+    }
+
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        ggml_backend_dev_t device = ggml_backend_dev_get(i);
+        const enum ggml_backend_dev_type type = ggml_backend_dev_type(device);
+        if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static void java_release_model_locked() {
@@ -691,28 +710,29 @@ Java_com_arm_aichat_LlamaAndroid_nativeInit(JNIEnv *env, jclass, jstring nativeL
     g_java_backend_initialized = true;
 }
 
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_arm_aichat_LlamaAndroid_nativeLoadModel(
+static bool java_load_model_locked(
         JNIEnv *env,
-        jobject,
-        jstring jmodel_path,
-        jstring jlora_path) {
-    std::lock_guard<std::mutex> lock(g_java_mutex);
-    java_release_model_locked();
-
-    const std::string model_path = java_string(env, jmodel_path);
-    const std::string lora_path = java_string(env, jlora_path);
+        const std::string &model_path,
+        const std::string &lora_path,
+        const bool use_gpu) {
     if (model_path.empty()) {
         java_throw(env, "java/lang/IllegalArgumentException", "Model path cannot be empty");
-        return;
+        return false;
+    }
+    if (use_gpu && !java_supports_gpu_locked()) {
+        java_throw(env, "java/lang/UnsupportedOperationException", "GPU backend is not available");
+        return false;
     }
 
+    java_release_model_locked();
+
     llama_model_params model_params = llama_model_default_params();
+    model_params.n_gpu_layers = use_gpu ? -1 : 0;
+
     g_java_model = llama_model_load_from_file(model_path.c_str(), model_params);
     if (g_java_model == nullptr) {
         java_throw(env, "java/io/IOException", "Failed to load GGUF model");
-        return;
+        return false;
     }
 
     llama_context_params ctx_params = llama_context_default_params();
@@ -727,7 +747,7 @@ Java_com_arm_aichat_LlamaAndroid_nativeLoadModel(
     if (g_java_context == nullptr) {
         java_release_model_locked();
         java_throw(env, "java/io/IOException", "Failed to create llama context");
-        return;
+        return false;
     }
 
     g_java_batch = llama_batch_init(BATCH_SIZE, 0, 1);
@@ -739,7 +759,7 @@ Java_com_arm_aichat_LlamaAndroid_nativeLoadModel(
     if (g_java_sampler == nullptr) {
         java_release_model_locked();
         java_throw(env, "java/io/IOException", "Failed to create decoder sampler");
-        return;
+        return false;
     }
 
     if (!lora_path.empty()) {
@@ -747,7 +767,7 @@ Java_com_arm_aichat_LlamaAndroid_nativeLoadModel(
         if (g_java_lora == nullptr) {
             java_release_model_locked();
             java_throw(env, "java/io/IOException", "Failed to load LoRA adapter");
-            return;
+            return false;
         }
 
         llama_adapter_lora *adapters[] = {g_java_lora};
@@ -755,9 +775,28 @@ Java_com_arm_aichat_LlamaAndroid_nativeLoadModel(
         if (llama_set_adapters_lora(g_java_context, adapters, 1, scales) != 0) {
             java_release_model_locked();
             java_throw(env, "java/io/IOException", "Failed to apply LoRA adapter");
-            return;
+            return false;
         }
     }
+
+    g_java_model_path = model_path;
+    g_java_lora_path = lora_path;
+    g_java_use_gpu = use_gpu;
+    return true;
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_arm_aichat_LlamaAndroid_nativeLoadModel(
+        JNIEnv *env,
+        jobject,
+        jstring jmodel_path,
+        jstring jlora_path) {
+    std::lock_guard<std::mutex> lock(g_java_mutex);
+
+    const std::string model_path = java_string(env, jmodel_path);
+    const std::string lora_path = java_string(env, jlora_path);
+    java_load_model_locked(env, model_path, lora_path, false);
 }
 
 extern "C"
@@ -765,12 +804,21 @@ JNIEXPORT jfloatArray JNICALL
 Java_com_arm_aichat_LlamaAndroid_nativeGetEmbeddings(
         JNIEnv *env,
         jobject,
-        jstring jinput) {
+        jstring jinput,
+        jboolean jis_with_gpu) {
     std::lock_guard<std::mutex> lock(g_java_mutex);
     if (!java_model_loaded()) {
         java_throw(env, "java/lang/IllegalStateException", "No model is loaded");
         return nullptr;
     }
+
+    const bool use_gpu = jis_with_gpu == JNI_TRUE;
+    if (use_gpu != g_java_use_gpu) {
+        if (!java_load_model_locked(env, g_java_model_path, g_java_lora_path, use_gpu)) {
+            return nullptr;
+        }
+    }
+
     if (!llama_model_has_encoder(g_java_model) || llama_model_has_decoder(g_java_model)) {
         java_throw(env, "java/lang/UnsupportedOperationException",
                    "Loaded model must be encoder-only to return embeddings");
@@ -921,19 +969,14 @@ JNIEXPORT void JNICALL
 Java_com_arm_aichat_LlamaAndroid_nativeRelease(JNIEnv *, jobject) {
     std::lock_guard<std::mutex> lock(g_java_mutex);
     java_release_model_locked();
+    g_java_model_path.clear();
+    g_java_lora_path.clear();
+    g_java_use_gpu = false;
 }
 
 extern "C"
 JNIEXPORT jboolean JNICALL
 Java_com_arm_aichat_LlamaAndroid_nativeSupportsGpu(JNIEnv *, jobject) {
     std::lock_guard<std::mutex> lock(g_java_mutex);
-    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
-        ggml_backend_dev_t device = ggml_backend_dev_get(i);
-        const enum ggml_backend_dev_type type = ggml_backend_dev_type(device);
-        if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
-            return JNI_TRUE;
-        }
-    }
-
-    return JNI_FALSE;
+    return java_supports_gpu_locked() ? JNI_TRUE : JNI_FALSE;
 }
