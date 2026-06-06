@@ -1,8 +1,13 @@
 #include <android/log.h>
 #include <jni.h>
+#include <algorithm>
+#include <cstring>
 #include <iomanip>
 #include <cmath>
+#include <mutex>
+#include <sstream>
 #include <string>
+#include <vector>
 #include <unistd.h>
 #include <sampling.h>
 
@@ -562,4 +567,358 @@ extern "C"
 JNIEXPORT void JNICALL
 Java_com_arm_aichat_internal_InferenceEngineImpl_shutdown(JNIEnv *, jobject /*unused*/) {
     llama_backend_free();
+}
+
+// --------------------------------------------------------------------------
+// Java API bridge
+// --------------------------------------------------------------------------
+
+static std::mutex            g_java_mutex;
+static bool                  g_java_backend_initialized;
+static llama_model         * g_java_model;
+static llama_context       * g_java_context;
+static llama_batch           g_java_batch;
+static bool                  g_java_batch_initialized;
+static common_sampler      * g_java_sampler;
+static llama_adapter_lora  * g_java_lora;
+
+static void java_throw(JNIEnv *env, const char *clazz, const std::string &message) {
+    jclass exception_class = env->FindClass(clazz);
+    if (exception_class != nullptr) {
+        env->ThrowNew(exception_class, message.c_str());
+    }
+}
+
+static int java_n_threads() {
+    return std::max(N_THREADS_MIN, std::min(N_THREADS_MAX,
+                                            (int) sysconf(_SC_NPROCESSORS_ONLN) -
+                                            N_THREADS_HEADROOM));
+}
+
+static void java_release_model_locked() {
+    if (g_java_sampler != nullptr) {
+        common_sampler_free(g_java_sampler);
+        g_java_sampler = nullptr;
+    }
+
+    if (g_java_context != nullptr) {
+        llama_free(g_java_context);
+        g_java_context = nullptr;
+    }
+
+    if (g_java_batch_initialized) {
+        llama_batch_free(g_java_batch);
+        g_java_batch = {};
+        g_java_batch_initialized = false;
+    }
+
+    if (g_java_lora != nullptr) {
+        llama_adapter_lora_free(g_java_lora);
+        g_java_lora = nullptr;
+    }
+
+    if (g_java_model != nullptr) {
+        llama_model_free(g_java_model);
+        g_java_model = nullptr;
+    }
+}
+
+static bool java_model_loaded() {
+    return g_java_model != nullptr && g_java_context != nullptr && g_java_batch_initialized;
+}
+
+static std::string java_string(JNIEnv *env, jstring value) {
+    if (value == nullptr) {
+        return {};
+    }
+
+    const char *chars = env->GetStringUTFChars(value, nullptr);
+    if (chars == nullptr) {
+        return {};
+    }
+
+    std::string result(chars);
+    env->ReleaseStringUTFChars(value, chars);
+    return result;
+}
+
+static int java_decode_tokens(
+        llama_context *context,
+        llama_batch &batch,
+        const llama_tokens &tokens,
+        const llama_pos start_pos,
+        const bool compute_last_logit) {
+    for (int i = 0; i < (int) tokens.size(); i += BATCH_SIZE) {
+        const int cur_batch_size = std::min((int) tokens.size() - i, BATCH_SIZE);
+        common_batch_clear(batch);
+
+        for (int j = 0; j < cur_batch_size; ++j) {
+            const bool want_logit = compute_last_logit && (i + j == (int) tokens.size() - 1);
+            common_batch_add(batch, tokens[i + j], start_pos + i + j, {0}, want_logit);
+        }
+
+        const int result = llama_decode(context, batch);
+        if (result != 0) {
+            LOGe("%s: llama_decode failed with %d", __func__, result);
+            return result;
+        }
+    }
+
+    return 0;
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_arm_aichat_LlamaAndroid_nativeInit(JNIEnv *env, jclass, jstring nativeLibDir) {
+    std::lock_guard<std::mutex> lock(g_java_mutex);
+    if (g_java_backend_initialized) {
+        return;
+    }
+
+    llama_log_set(aichat_android_log_callback, nullptr);
+
+    const auto *path_to_backend = env->GetStringUTFChars(nativeLibDir, nullptr);
+    if (path_to_backend == nullptr) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Native library directory cannot be null");
+        return;
+    }
+
+    LOGi("Java API loading backends from %s", path_to_backend);
+    ggml_backend_load_all_from_path(path_to_backend);
+    env->ReleaseStringUTFChars(nativeLibDir, path_to_backend);
+
+    llama_backend_init();
+    g_java_backend_initialized = true;
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_arm_aichat_LlamaAndroid_nativeLoadModel(
+        JNIEnv *env,
+        jobject,
+        jstring jmodel_path,
+        jstring jlora_path) {
+    std::lock_guard<std::mutex> lock(g_java_mutex);
+    java_release_model_locked();
+
+    const std::string model_path = java_string(env, jmodel_path);
+    const std::string lora_path = java_string(env, jlora_path);
+    if (model_path.empty()) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Model path cannot be empty");
+        return;
+    }
+
+    llama_model_params model_params = llama_model_default_params();
+    g_java_model = llama_model_load_from_file(model_path.c_str(), model_params);
+    if (g_java_model == nullptr) {
+        java_throw(env, "java/io/IOException", "Failed to load GGUF model");
+        return;
+    }
+
+    llama_context_params ctx_params = llama_context_default_params();
+    ctx_params.n_ctx = DEFAULT_CONTEXT_SIZE;
+    ctx_params.n_batch = BATCH_SIZE;
+    ctx_params.n_ubatch = BATCH_SIZE;
+    ctx_params.n_threads = java_n_threads();
+    ctx_params.n_threads_batch = ctx_params.n_threads;
+    ctx_params.embeddings = true;
+
+    g_java_context = llama_init_from_model(g_java_model, ctx_params);
+    if (g_java_context == nullptr) {
+        java_release_model_locked();
+        java_throw(env, "java/io/IOException", "Failed to create llama context");
+        return;
+    }
+
+    g_java_batch = llama_batch_init(BATCH_SIZE, 0, 1);
+    g_java_batch_initialized = true;
+
+    common_params_sampling sparams;
+    sparams.temp = DEFAULT_SAMPLER_TEMP;
+    g_java_sampler = common_sampler_init(g_java_model, sparams);
+    if (g_java_sampler == nullptr) {
+        java_release_model_locked();
+        java_throw(env, "java/io/IOException", "Failed to create decoder sampler");
+        return;
+    }
+
+    if (!lora_path.empty()) {
+        g_java_lora = llama_adapter_lora_init(g_java_model, lora_path.c_str());
+        if (g_java_lora == nullptr) {
+            java_release_model_locked();
+            java_throw(env, "java/io/IOException", "Failed to load LoRA adapter");
+            return;
+        }
+
+        llama_adapter_lora *adapters[] = {g_java_lora};
+        float scales[] = {1.0f};
+        if (llama_set_adapters_lora(g_java_context, adapters, 1, scales) != 0) {
+            java_release_model_locked();
+            java_throw(env, "java/io/IOException", "Failed to apply LoRA adapter");
+            return;
+        }
+    }
+}
+
+extern "C"
+JNIEXPORT jfloatArray JNICALL
+Java_com_arm_aichat_LlamaAndroid_nativeGetEmbeddings(
+        JNIEnv *env,
+        jobject,
+        jstring jinput) {
+    std::lock_guard<std::mutex> lock(g_java_mutex);
+    if (!java_model_loaded()) {
+        java_throw(env, "java/lang/IllegalStateException", "No model is loaded");
+        return nullptr;
+    }
+    if (!llama_model_has_encoder(g_java_model) || llama_model_has_decoder(g_java_model)) {
+        java_throw(env, "java/lang/UnsupportedOperationException",
+                   "Loaded model must be encoder-only to return embeddings");
+        return nullptr;
+    }
+
+    const std::string input = java_string(env, jinput);
+    if (input.empty()) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Input cannot be empty");
+        return nullptr;
+    }
+
+    llama_set_embeddings(g_java_context, true);
+    llama_set_causal_attn(g_java_context, false);
+    llama_memory_clear(llama_get_memory(g_java_context), true);
+
+    llama_tokens tokens = common_tokenize(g_java_context, input, true, true);
+    if (tokens.empty()) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Input did not produce tokens");
+        return nullptr;
+    }
+    if ((int) tokens.size() > BATCH_SIZE) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Input exceeds Android embedding batch size");
+        return nullptr;
+    }
+
+    common_batch_clear(g_java_batch);
+    for (int i = 0; i < (int) tokens.size(); ++i) {
+        common_batch_add(g_java_batch, tokens[i], i, {0}, true);
+    }
+
+    const int result = llama_encode(g_java_context, g_java_batch);
+    if (result < 0) {
+        java_throw(env, "java/lang/IllegalStateException", "Failed to encode input");
+        return nullptr;
+    }
+
+    const enum llama_pooling_type pooling_type = llama_pooling_type(g_java_context);
+    const float *embedding = pooling_type == LLAMA_POOLING_TYPE_NONE
+                             ? llama_get_embeddings_ith(g_java_context, g_java_batch.n_tokens - 1)
+                             : llama_get_embeddings_seq(g_java_context, 0);
+    if (embedding == nullptr) {
+        java_throw(env, "java/lang/IllegalStateException", "Model did not return embeddings");
+        return nullptr;
+    }
+
+    int output_size = llama_model_n_embd_out(g_java_model);
+    if (pooling_type == LLAMA_POOLING_TYPE_RANK) {
+        output_size = std::min(output_size, (int) llama_model_n_cls_out(g_java_model));
+    }
+
+    std::vector<float> normalized(output_size);
+    common_embd_normalize(embedding, normalized.data(), output_size, 2);
+
+    jfloatArray result_array = env->NewFloatArray(output_size);
+    if (result_array == nullptr) {
+        return nullptr;
+    }
+
+    env->SetFloatArrayRegion(result_array, 0, output_size, normalized.data());
+    return result_array;
+}
+
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_arm_aichat_LlamaAndroid_nativeDecode(
+        JNIEnv *env,
+        jobject,
+        jstring jinput,
+        jint predict_length) {
+    std::lock_guard<std::mutex> lock(g_java_mutex);
+    if (!java_model_loaded()) {
+        java_throw(env, "java/lang/IllegalStateException", "No model is loaded");
+        return nullptr;
+    }
+    if (!llama_model_has_decoder(g_java_model)) {
+        java_throw(env, "java/lang/UnsupportedOperationException", "Loaded model does not support decoder execution");
+        return nullptr;
+    }
+    if (predict_length <= 0) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Predict length must be positive");
+        return nullptr;
+    }
+
+    const std::string input = java_string(env, jinput);
+    if (input.empty()) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Input cannot be empty");
+        return nullptr;
+    }
+
+    llama_set_embeddings(g_java_context, false);
+    llama_set_causal_attn(g_java_context, true);
+    llama_memory_clear(llama_get_memory(g_java_context), false);
+    common_sampler_reset(g_java_sampler);
+
+    llama_tokens tokens = common_tokenize(g_java_context, input, true, true);
+    if (tokens.empty()) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Input did not produce tokens");
+        return nullptr;
+    }
+    if ((int) tokens.size() >= DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Input exceeds Android context size");
+        return nullptr;
+    }
+
+    if (java_decode_tokens(g_java_context, g_java_batch, tokens, 0, true) != 0) {
+        java_throw(env, "java/lang/IllegalStateException", "Failed to decode input");
+        return nullptr;
+    }
+
+    llama_pos current_pos = (llama_pos) tokens.size();
+    std::string output;
+    const llama_vocab *vocab = llama_model_get_vocab(g_java_model);
+
+    for (int i = 0; i < predict_length; ++i) {
+        if (current_pos >= DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM) {
+            break;
+        }
+
+        const llama_token token = common_sampler_sample(g_java_sampler, g_java_context, -1);
+        common_sampler_accept(g_java_sampler, token, true);
+        if (llama_vocab_is_eog(vocab, token)) {
+            break;
+        }
+
+        output += common_token_to_piece(g_java_context, token);
+
+        common_batch_clear(g_java_batch);
+        common_batch_add(g_java_batch, token, current_pos, {0}, true);
+        const int result = llama_decode(g_java_context, g_java_batch);
+        if (result != 0) {
+            java_throw(env, "java/lang/IllegalStateException", "Failed to decode generated token");
+            return nullptr;
+        }
+        current_pos++;
+    }
+
+    if (!is_valid_utf8(output.c_str())) {
+        java_throw(env, "java/lang/IllegalStateException", "Decoder returned invalid UTF-8");
+        return nullptr;
+    }
+
+    return env->NewStringUTF(output.c_str());
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_arm_aichat_LlamaAndroid_nativeRelease(JNIEnv *, jobject) {
+    std::lock_guard<std::mutex> lock(g_java_mutex);
+    java_release_model_locked();
 }
