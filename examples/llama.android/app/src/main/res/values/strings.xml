@@ -1,3 +1,15 @@
 <resources>
-    <string name="app_name">AI Chat basic sample</string>
+    <string name="app_name">Llama Android Java sample</string>
+    <string name="status_initializing">Initializing engine...</string>
+    <string name="pick_model">Pick GGUF model</string>
+    <string name="no_model_selected">No model selected.</string>
+    <string name="pick_lora">Pick LoRA adapter (optional)</string>
+    <string name="no_lora_selected">No LoRA adapter selected.</string>
+    <string name="clear_lora">Clear LoRA adapter</string>
+    <string name="load_model">Load model</string>
+    <string name="prompt_hint">Enter text for embeddings or prompt for decode</string>
+    <string name="get_embeddings">Get embeddings</string>
+    <string name="decode">Decode</string>
+    <string name="release_model">Release model</string>
+    <string name="output_placeholder">Output will appear here.</string>
 </resources>
