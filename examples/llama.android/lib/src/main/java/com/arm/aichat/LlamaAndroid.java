@@ -70,6 +70,26 @@ public final class LlamaAndroid implements AutoCloseable {
     }
 
     /**
+     * Returns a raw, unnormalized embedding vector for {@code input}.
+     */
+    public synchronized float[] getEmbeddingWithoutNormalized(String input) {
+        requireInput(input);
+        return nativeGetEmbeddingWithoutNormalized(input);
+    }
+
+    /**
+     * Supporting spelling variations for ease of use.
+     */
+    public synchronized float[] getEmbeedingWithoutNormalized(String input) {
+        return getEmbeddingWithoutNormalized(input);
+    }
+
+    public synchronized float[] getEmbeddingsWithoutNormalized(String input) {
+        return getEmbeddingWithoutNormalized(input);
+    }
+
+
+    /**
      * Decodes from {@code input} using {@link #DEFAULT_PREDICT_LENGTH}.
      *
      * @throws UnsupportedOperationException when the loaded model does not support decoding.
@@ -140,6 +160,8 @@ public final class LlamaAndroid implements AutoCloseable {
     private native void nativeLoadModel(String modelPath, String loraPath) throws IOException;
 
     private native float[] nativeGetEmbeddings(String input);
+
+    private native float[] nativeGetEmbeddingWithoutNormalized(String input);
 
     private native String nativeDecode(String input, int predictLength);
 

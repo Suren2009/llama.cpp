@@ -886,6 +886,72 @@ Java_com_arm_aichat_LlamaAndroid_nativeGetEmbeddings(
 }
 
 extern "C"
+JNIEXPORT jfloatArray JNICALL
+Java_com_arm_aichat_LlamaAndroid_nativeGetEmbeddingWithoutNormalized(
+        JNIEnv *env,
+        jobject,
+        jstring jinput) {
+    std::lock_guard<std::mutex> lock(g_java_mutex);
+    if (!java_model_loaded()) {
+        java_throw(env, "java/lang/IllegalStateException", "No model is loaded");
+        return nullptr;
+    }
+
+    const std::string input = java_string(env, jinput);
+    if (input.empty()) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Input cannot be empty");
+        return nullptr;
+    }
+
+    llama_set_embeddings(g_java_context, true);
+    llama_set_causal_attn(g_java_context, false);
+    llama_memory_clear(llama_get_memory(g_java_context), true);
+
+    llama_tokens tokens = common_tokenize(g_java_context, input, true, true);
+    if (tokens.empty()) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Input did not produce tokens");
+        return nullptr;
+    }
+    if ((int) tokens.size() > BATCH_SIZE) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Input exceeds Android embedding batch size");
+        return nullptr;
+    }
+
+    common_batch_clear(g_java_batch);
+    for (int i = 0; i < (int) tokens.size(); ++i) {
+        common_batch_add(g_java_batch, tokens[i], i, {0}, true);
+    }
+
+    const int result = llama_encode(g_java_context, g_java_batch);
+    if (result < 0) {
+        java_throw(env, "java/lang/IllegalStateException", "Failed to encode input");
+        return nullptr;
+    }
+
+    const enum llama_pooling_type pooling_type = llama_pooling_type(g_java_context);
+    const float *embedding = pooling_type == LLAMA_POOLING_TYPE_NONE
+                             ? llama_get_embeddings_ith(g_java_context, g_java_batch.n_tokens - 1)
+                             : llama_get_embeddings_seq(g_java_context, 0);
+    if (embedding == nullptr) {
+        java_throw(env, "java/lang/IllegalStateException", "Model did not return embeddings");
+        return nullptr;
+    }
+
+    int output_size = llama_model_n_embd_out(g_java_model);
+    if (pooling_type == LLAMA_POOLING_TYPE_RANK) {
+        output_size = std::min(output_size, (int) llama_model_n_cls_out(g_java_model));
+    }
+
+    jfloatArray result_array = env->NewFloatArray(output_size);
+    if (result_array == nullptr) {
+        return nullptr;
+    }
+
+    env->SetFloatArrayRegion(result_array, 0, output_size, embedding);
+    return result_array;
+}
+
+extern "C"
 JNIEXPORT jstring JNICALL
 Java_com_arm_aichat_LlamaAndroid_nativeDecode(
         JNIEnv *env,
