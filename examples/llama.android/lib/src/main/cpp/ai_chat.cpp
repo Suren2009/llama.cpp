@@ -922,3 +922,18 @@ Java_com_arm_aichat_LlamaAndroid_nativeRelease(JNIEnv *, jobject) {
     std::lock_guard<std::mutex> lock(g_java_mutex);
     java_release_model_locked();
 }
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_arm_aichat_LlamaAndroid_nativeSupportsGpu(JNIEnv *, jobject) {
+    std::lock_guard<std::mutex> lock(g_java_mutex);
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        ggml_backend_dev_t device = ggml_backend_dev_get(i);
+        const enum ggml_backend_dev_type type = ggml_backend_dev_type(device);
+        if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            return JNI_TRUE;
+        }
+    }
+
+    return JNI_FALSE;
+}

@@ -94,6 +94,13 @@ public final class LlamaAndroid implements AutoCloseable {
     }
 
     /**
+     * Returns true when llama.cpp has a GPU or integrated-GPU backend device available.
+     */
+    public synchronized boolean supportsGpu() {
+        return nativeSupportsGpu();
+    }
+
+    /**
      * Releases the loaded model and native resources owned by this Java API.
      */
     public synchronized void release() {
@@ -135,6 +142,8 @@ public final class LlamaAndroid implements AutoCloseable {
     private native float[] nativeGetEmbeddings(String input);
 
     private native String nativeDecode(String input, int predictLength);
+
+    private native boolean nativeSupportsGpu();
 
     private native void nativeRelease();
 }
