@@ -65,18 +65,8 @@ public final class LlamaAndroid implements AutoCloseable {
      * @throws UnsupportedOperationException when the loaded model is not encoder-only.
      */
     public synchronized float[] getEmbeddings(String input) {
-        return getEmbeddings(input, false);
-    }
-
-    /**
-     * Returns a normalized embedding vector for {@code input}.
-     *
-     * @param inferenceWithGpu true to run with GPU offload when available, false to force CPU.
-     * @throws UnsupportedOperationException when the loaded model is not encoder-only or GPU was requested but unavailable.
-     */
-    public synchronized float[] getEmbeddings(String input, boolean inferenceWithGpu) {
         requireInput(input);
-        return nativeGetEmbeddings(input, inferenceWithGpu);
+        return nativeGetEmbeddings(input);
     }
 
     /**
@@ -89,39 +79,18 @@ public final class LlamaAndroid implements AutoCloseable {
     }
 
     /**
-     * Decodes from {@code input} using {@link #DEFAULT_PREDICT_LENGTH}.
-     *
-     * @param inferenceWithGpu true to run with GPU offload when available, false to force CPU.
-     * @throws UnsupportedOperationException when the loaded model does not support decoding or GPU was requested but unavailable.
-     */
-    public synchronized String decode(String input, boolean inferenceWithGpu) {
-        return decode(input, DEFAULT_PREDICT_LENGTH, inferenceWithGpu);
-    }
-
-    /**
      * Decodes from {@code input}.
      *
      * @param predictLength maximum number of tokens to generate.
      * @throws UnsupportedOperationException when the loaded model does not support decoding.
      */
     public synchronized String decode(String input, int predictLength) {
-        return decode(input, predictLength, false);
-    }
-
-    /**
-     * Decodes from {@code input}.
-     *
-     * @param predictLength maximum number of tokens to generate.
-     * @param inferenceWithGpu true to run with GPU offload when available, false to force CPU.
-     * @throws UnsupportedOperationException when the loaded model does not support decoding or GPU was requested but unavailable.
-     */
-    public synchronized String decode(String input, int predictLength, boolean inferenceWithGpu) {
         requireInput(input);
         if (predictLength <= 0) {
             throw new IllegalArgumentException("Predict length must be positive");
         }
 
-        return nativeDecode(input, predictLength, inferenceWithGpu);
+        return nativeDecode(input, predictLength);
     }
 
     /**
@@ -170,9 +139,9 @@ public final class LlamaAndroid implements AutoCloseable {
 
     private native void nativeLoadModel(String modelPath, String loraPath) throws IOException;
 
-    private native float[] nativeGetEmbeddings(String input, boolean inferenceWithGpu);
+    private native float[] nativeGetEmbeddings(String input);
 
-    private native String nativeDecode(String input, int predictLength, boolean inferenceWithGpu);
+    private native String nativeDecode(String input, int predictLength);
 
     private native boolean nativeSupportsGpu();
 

@@ -581,9 +581,6 @@ static llama_batch           g_java_batch;
 static bool                  g_java_batch_initialized;
 static common_sampler      * g_java_sampler;
 static llama_adapter_lora  * g_java_lora;
-static std::string           g_java_model_path;
-static std::string           g_java_lora_path;
-static bool                  g_java_use_gpu;
 
 static void java_throw(JNIEnv *env, const char *clazz, const std::string &message) {
     jclass exception_class = env->FindClass(clazz);
@@ -779,10 +776,27 @@ static bool java_load_model_locked(
         }
     }
 
-    g_java_model_path = model_path;
-    g_java_lora_path = lora_path;
-    g_java_use_gpu = use_gpu;
     return true;
+}
+
+static bool java_load_model_auto_locked(
+        JNIEnv *env,
+        const std::string &model_path,
+        const std::string &lora_path) {
+    if (model_path.empty()) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Model path cannot be empty");
+        return false;
+    }
+
+    if (java_supports_gpu_locked() && java_load_model_locked(env, model_path, lora_path, true)) {
+        return true;
+    }
+
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        LOGw("%s: GPU load failed; retrying on CPU", __func__);
+    }
+    return java_load_model_locked(env, model_path, lora_path, false);
 }
 
 extern "C"
@@ -796,7 +810,7 @@ Java_com_arm_aichat_LlamaAndroid_nativeLoadModel(
 
     const std::string model_path = java_string(env, jmodel_path);
     const std::string lora_path = java_string(env, jlora_path);
-    java_load_model_locked(env, model_path, lora_path, false);
+    java_load_model_auto_locked(env, model_path, lora_path);
 }
 
 extern "C"
@@ -804,19 +818,11 @@ JNIEXPORT jfloatArray JNICALL
 Java_com_arm_aichat_LlamaAndroid_nativeGetEmbeddings(
         JNIEnv *env,
         jobject,
-        jstring jinput,
-        jboolean jis_with_gpu) {
+        jstring jinput) {
     std::lock_guard<std::mutex> lock(g_java_mutex);
     if (!java_model_loaded()) {
         java_throw(env, "java/lang/IllegalStateException", "No model is loaded");
         return nullptr;
-    }
-
-    const bool use_gpu = jis_with_gpu == JNI_TRUE;
-    if (use_gpu != g_java_use_gpu) {
-        if (!java_load_model_locked(env, g_java_model_path, g_java_lora_path, use_gpu)) {
-            return nullptr;
-        }
     }
 
     if (!llama_model_has_encoder(g_java_model) || llama_model_has_decoder(g_java_model)) {
@@ -888,19 +894,11 @@ Java_com_arm_aichat_LlamaAndroid_nativeDecode(
         JNIEnv *env,
         jobject,
         jstring jinput,
-        jint predict_length,
-        jboolean jinference_with_gpu) {
+        jint predict_length) {
     std::lock_guard<std::mutex> lock(g_java_mutex);
     if (!java_model_loaded()) {
         java_throw(env, "java/lang/IllegalStateException", "No model is loaded");
         return nullptr;
-    }
-
-    const bool use_gpu = jinference_with_gpu == JNI_TRUE;
-    if (use_gpu != g_java_use_gpu) {
-        if (!java_load_model_locked(env, g_java_model_path, g_java_lora_path, use_gpu)) {
-            return nullptr;
-        }
     }
 
     if (!llama_model_has_decoder(g_java_model)) {
@@ -978,9 +976,6 @@ JNIEXPORT void JNICALL
 Java_com_arm_aichat_LlamaAndroid_nativeRelease(JNIEnv *, jobject) {
     std::lock_guard<std::mutex> lock(g_java_mutex);
     java_release_model_locked();
-    g_java_model_path.clear();
-    g_java_lora_path.clear();
-    g_java_use_gpu = false;
 }
 
 extern "C"
