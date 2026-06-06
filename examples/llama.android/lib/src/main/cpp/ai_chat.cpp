@@ -888,12 +888,21 @@ Java_com_arm_aichat_LlamaAndroid_nativeDecode(
         JNIEnv *env,
         jobject,
         jstring jinput,
-        jint predict_length) {
+        jint predict_length,
+        jboolean jinference_with_gpu) {
     std::lock_guard<std::mutex> lock(g_java_mutex);
     if (!java_model_loaded()) {
         java_throw(env, "java/lang/IllegalStateException", "No model is loaded");
         return nullptr;
     }
+
+    const bool use_gpu = jinference_with_gpu == JNI_TRUE;
+    if (use_gpu != g_java_use_gpu) {
+        if (!java_load_model_locked(env, g_java_model_path, g_java_lora_path, use_gpu)) {
+            return nullptr;
+        }
+    }
+
     if (!llama_model_has_decoder(g_java_model)) {
         java_throw(env, "java/lang/UnsupportedOperationException", "Loaded model does not support decoder execution");
         return nullptr;
