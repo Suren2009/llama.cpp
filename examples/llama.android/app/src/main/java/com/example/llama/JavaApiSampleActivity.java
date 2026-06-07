@@ -178,7 +178,7 @@ public final class JavaApiSampleActivity extends AppCompatActivity {
 
         runEngineTask("Getting embeddings...", () -> {
             float[] embeddings = llama.getEmbeddings(prompt);
-            float[] rawEmbeddings = llama.getEmbeddingWithoutNormalized(prompt);
+            float[] rawEmbeddings = llama.getRawEmbeddings(prompt);
 
             StringBuilder preview = new StringBuilder();
             int previewCount = Math.min(8, embeddings.length);
@@ -198,8 +198,11 @@ public final class JavaApiSampleActivity extends AppCompatActivity {
                 rawPreview.append(String.format(Locale.US, "%.5f", rawEmbeddings[i]));
             }
 
+            int dimension = embeddings.length;
+            int numTokens = rawEmbeddings.length / dimension;
+
             postOutput("Normalized embedding size: " + embeddings.length + "\nFirst values: [" + preview + "]\n\n" +
-                       "Raw (Unnormalized) embedding size: " + rawEmbeddings.length + "\nFirst values: [" + rawPreview + "]");
+                       "Raw (Unnormalized) embedding size: " + rawEmbeddings.length + " (" + numTokens + " tokens * " + dimension + " dims)\nFirst values: [" + rawPreview + "]");
             postStatus("Embeddings complete.");
         });
     }

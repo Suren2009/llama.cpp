@@ -66,26 +66,72 @@ public final class LlamaAndroid implements AutoCloseable {
      */
     public synchronized float[] getEmbeddings(String input) {
         requireInput(input);
-        return nativeGetEmbeddings(input);
+        float[] raw = getRawEmbeddings(input);
+        if (raw == null || raw.length == 0) {
+            return null;
+        }
+
+        int dim = nativeGetEmbeddingDimension();
+        if (dim <= 0) {
+            return null;
+        }
+
+        int numTokens = raw.length / dim;
+        int poolingType = nativeGetPoolingType();
+
+        float[] pooled = new float[dim];
+        if (poolingType == 1) { // LLAMA_POOLING_TYPE_MEAN
+            for (int i = 0; i < numTokens; ++i) {
+                for (int d = 0; d < dim; ++d) {
+                    pooled[d] += raw[i * dim + d];
+                }
+            }
+            for (int d = 0; d < dim; ++d) {
+                pooled[d] /= numTokens;
+            }
+        } else if (poolingType == 2) { // LLAMA_POOLING_TYPE_CLS
+            System.arraycopy(raw, 0, pooled, 0, dim);
+        } else if (poolingType == 3) { // LLAMA_POOLING_TYPE_LAST
+            System.arraycopy(raw, (numTokens - 1) * dim, pooled, 0, dim);
+        } else { // default fallback
+            System.arraycopy(raw, (numTokens - 1) * dim, pooled, 0, dim);
+        }
+
+        // L2 Normalization (embd_norm = 2)
+        double sum = 0.0;
+        for (int d = 0; d < dim; ++d) {
+            sum += pooled[d] * pooled[d];
+        }
+        double norm = Math.sqrt(sum);
+        float normFactor = norm > 0.0 ? (float) (1.0 / norm) : 0.0f;
+        for (int d = 0; d < dim; ++d) {
+            pooled[d] *= normFactor;
+        }
+
+        return pooled;
     }
 
     /**
-     * Returns a raw, unnormalized embedding vector for {@code input}.
+     * Returns raw, unnormalized embeddings for {@code input}.
+     */
+    public synchronized float[] getRawEmbeddings(String input) {
+        requireInput(input);
+        return nativeGetRawEmbeddings(input);
+    }
+
+    /**
+     * Supporting backward-compatible names and spelling variations.
      */
     public synchronized float[] getEmbeddingWithoutNormalized(String input) {
-        requireInput(input);
-        return nativeGetEmbeddingWithoutNormalized(input);
+        return getRawEmbeddings(input);
     }
 
-    /**
-     * Supporting spelling variations for ease of use.
-     */
     public synchronized float[] getEmbeedingWithoutNormalized(String input) {
-        return getEmbeddingWithoutNormalized(input);
+        return getRawEmbeddings(input);
     }
 
     public synchronized float[] getEmbeddingsWithoutNormalized(String input) {
-        return getEmbeddingWithoutNormalized(input);
+        return getRawEmbeddings(input);
     }
 
 
@@ -159,9 +205,13 @@ public final class LlamaAndroid implements AutoCloseable {
 
     private native void nativeLoadModel(String modelPath, String loraPath) throws IOException;
 
+    private native int nativeGetEmbeddingDimension();
+
+    private native int nativeGetPoolingType();
+
     private native float[] nativeGetEmbeddings(String input);
 
-    private native float[] nativeGetEmbeddingWithoutNormalized(String input);
+    private native float[] nativeGetRawEmbeddings(String input);
 
     private native String nativeDecode(String input, int predictLength);
 
