@@ -42,7 +42,7 @@ android {
     externalNativeBuild {
         cmake {
             path("src/main/cpp/CMakeLists.txt")
-            version = "3.31.6"
+            version = "3.22.1"
         }
     }
     compileOptions {
@@ -70,6 +70,14 @@ android {
     }
 }
 
+tasks.register<Copy>("copyAarToOutput") {
+    dependsOn("assembleRelease")
+    from(layout.buildDirectory.dir("outputs/aar"))
+    include("lib-release.aar")
+    into(rootProject.file("../../output"))
+    rename { "llama-android.aar" }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.datastore.preferences)
@@ -77,3 +85,4 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
 }
+

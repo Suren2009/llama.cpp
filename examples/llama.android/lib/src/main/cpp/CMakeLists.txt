@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.31.6)
+cmake_minimum_required(VERSION 3.22.1)
 
 project("ai-chat" VERSION 1.0.0 LANGUAGES C CXX)
 
@@ -19,7 +19,7 @@ if(DEFINED ANDROID_ABI)
     message(STATUS "Detected Android ABI: ${ANDROID_ABI}")
     if(ANDROID_ABI STREQUAL "arm64-v8a")
         set(GGML_SYSTEM_ARCH "ARM")
-        set(GGML_CPU_KLEIDIAI ON)
+        set(GGML_CPU_KLEIDIAI OFF)
         set(GGML_OPENMP ON)
     elseif(ANDROID_ABI STREQUAL "x86_64")
         set(GGML_SYSTEM_ARCH "x86")

@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:fitsSystemWindows="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/status"
+            style="@style/TextAppearance.MaterialComponents.Body1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/status_initializing" />
+
+        <Button
+            android:id="@+id/pick_model"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/pick_model" />
+
+        <TextView
+            android:id="@+id/model_path"
+            style="@style/TextAppearance.MaterialComponents.Body2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/no_model_selected" />
+
+        <Button
+            android:id="@+id/pick_lora"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/pick_lora" />
+
+        <TextView
+            android:id="@+id/lora_path"
+            style="@style/TextAppearance.MaterialComponents.Body2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/no_lora_selected" />
+
+        <Button
+            android:id="@+id/clear_lora"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/clear_lora" />
+
+        <Button
+            android:id="@+id/load_model"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/load_model" />
+
+        <EditText
+            android:id="@+id/prompt_input"
+            style="@style/TextAppearance.MaterialComponents.Body2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="top"
+            android:hint="@string/prompt_hint"
+            android:inputType="textMultiLine"
+            android:minLines="3" />
+
+        <Button
+            android:id="@+id/get_embeddings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/get_embeddings" />
+
+        <Button
+            android:id="@+id/decode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/decode" />
+
+        <Button
+            android:id="@+id/release"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/release_model" />
+
+        <TextView
+            android:id="@+id/output"
+            style="@style/TextAppearance.MaterialComponents.Body2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/output_placeholder" />
+
+    </LinearLayout>
+</ScrollView>
