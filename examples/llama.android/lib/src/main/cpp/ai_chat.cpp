@@ -1017,6 +1017,126 @@ Java_com_arm_aichat_LlamaAndroid_nativeGetRawEmbeddings(
 }
 
 extern "C"
+JNIEXPORT jfloatArray JNICALL
+Java_com_arm_aichat_LlamaAndroid_nativeGetRawEmbeddingsFromTokens(
+        JNIEnv *env,
+        jobject,
+        jintArray jtokens) {
+    std::lock_guard<std::mutex> lock(g_java_mutex);
+    if (!java_model_loaded()) {
+        java_throw(env, "java/lang/IllegalStateException", "No model is loaded");
+        return nullptr;
+    }
+
+    if (jtokens == nullptr) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Tokens cannot be null");
+        return nullptr;
+    }
+
+    jsize n_tokens = env->GetArrayLength(jtokens);
+    if (n_tokens == 0) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Tokens array cannot be empty");
+        return nullptr;
+    }
+    if ((int) n_tokens > BATCH_SIZE) {
+        java_throw(env, "java/lang/IllegalArgumentException", "Tokens exceed Android embedding batch size");
+        return nullptr;
+    }
+
+    jint *tokens_ptr = env->GetIntArrayElements(jtokens, nullptr);
+    if (tokens_ptr == nullptr) {
+        return nullptr;
+    }
+
+    llama_set_embeddings(g_java_context, true);
+    llama_set_causal_attn(g_java_context, false);
+    llama_memory_clear(llama_get_memory(g_java_context), true);
+
+    common_batch_clear(g_java_batch);
+    for (int i = 0; i < (int) n_tokens; ++i) {
+        common_batch_add(g_java_batch, tokens_ptr[i], i, {0}, true);
+    }
+
+    env->ReleaseIntArrayElements(jtokens, tokens_ptr, JNI_ABORT);
+
+    const int result = llama_encode(g_java_context, g_java_batch);
+    if (result < 0) {
+        java_throw(env, "java/lang/IllegalStateException", "Failed to encode input tokens");
+        return nullptr;
+    }
+
+    int output_size = llama_model_n_embd_out(g_java_model);
+    const enum llama_pooling_type pooling_type = llama_pooling_type(g_java_context);
+    if (pooling_type == LLAMA_POOLING_TYPE_RANK) {
+        output_size = std::min(output_size, (int) llama_model_n_cls_out(g_java_model));
+    }
+
+    jfloatArray result_array = env->NewFloatArray(n_tokens * output_size);
+    if (result_array == nullptr) {
+        return nullptr;
+    }
+
+    for (int i = 0; i < n_tokens; ++i) {
+        const float *embedding = llama_get_embeddings_ith(g_java_context, i);
+        if (embedding == nullptr) {
+            java_throw(env, "java/lang/IllegalStateException", "Model did not return embedding for token");
+            return nullptr;
+        }
+        env->SetFloatArrayRegion(result_array, i * output_size, output_size, embedding);
+    }
+    return result_array;
+}
+
+extern "C"
+JNIEXPORT jintArray JNICALL
+Java_com_arm_aichat_LlamaAndroid_nativeTokenize(
+        JNIEnv *env,
+        jobject,
+        jstring jtext,
+        jboolean jadd_special) {
+    std::lock_guard<std::mutex> lock(g_java_mutex);
+    if (!java_model_loaded()) {
+        java_throw(env, "java/lang/IllegalStateException", "No model is loaded");
+        return nullptr;
+    }
+
+    const std::string text = java_string(env, jtext);
+    llama_tokens tokens = common_tokenize(g_java_context, text, jadd_special, true);
+
+    jintArray result_array = env->NewIntArray(tokens.size());
+    if (result_array == nullptr) {
+        return nullptr;
+    }
+
+    env->SetIntArrayRegion(result_array, 0, tokens.size(), reinterpret_cast<const jint*>(tokens.data()));
+    return result_array;
+}
+
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_arm_aichat_LlamaAndroid_nativeGetTokenBos(JNIEnv *env, jobject) {
+    std::lock_guard<std::mutex> lock(g_java_mutex);
+    if (g_java_model == nullptr) {
+        java_throw(env, "java/lang/IllegalStateException", "No model is loaded");
+        return -1;
+    }
+    const llama_vocab *vocab = llama_model_get_vocab(g_java_model);
+    return llama_vocab_bos(vocab);
+}
+
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_arm_aichat_LlamaAndroid_nativeGetTokenEos(JNIEnv *env, jobject) {
+    std::lock_guard<std::mutex> lock(g_java_mutex);
+    if (g_java_model == nullptr) {
+        java_throw(env, "java/lang/IllegalStateException", "No model is loaded");
+        return -1;
+    }
+    const llama_vocab *vocab = llama_model_get_vocab(g_java_model);
+    return llama_vocab_eos(vocab);
+}
+
+extern "C"
 JNIEXPORT jstring JNICALL
 Java_com_arm_aichat_LlamaAndroid_nativeDecode(
         JNIEnv *env,

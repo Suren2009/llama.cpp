@@ -105,6 +105,23 @@ Computes raw token-level embeddings (returns a float array of size `number_of_to
 float[] rawEmbeddings = llama.getRawEmbeddings("Your prompt text here");
 ```
 
+#### Tokenizing Text & Extracting Special Tokens
+You can tokenize inputs to obtain raw token IDs and fetch model-specific special tokens (like Beginning of Sentence and End of Sentence):
+```java
+// Tokenize text to obtain token ID array (e.g. without prepending BOS automatically)
+int[] tokens = llama.tokenize("Your text here", false);
+
+// Retrieve BOS/EOS tokens
+int bosToken = llama.getBosToken();
+int eosToken = llama.getEosToken();
+```
+
+#### Fetching Raw Embeddings from Token IDs
+To compute raw token-level embeddings directly using token IDs (bypassing text-based tokenization), call `getRawEmbeddings(int[])`:
+```java
+float[] rawEmbeddingsFromTokens = llama.getRawEmbeddings(tokens);
+```
+
 ---
 
 ## 4. Releasing & Closing Resources

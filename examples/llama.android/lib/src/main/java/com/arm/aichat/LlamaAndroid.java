@@ -120,6 +120,29 @@ public final class LlamaAndroid implements AutoCloseable {
     }
 
     /**
+     * Returns raw, unnormalized embeddings for {@code tokens}.
+     */
+    public synchronized float[] getRawEmbeddings(int[] tokens) {
+        if (tokens == null || tokens.length == 0) {
+            throw new IllegalArgumentException("Tokens cannot be empty");
+        }
+        return nativeGetRawEmbeddingsFromTokens(tokens);
+    }
+
+    public synchronized int[] tokenize(String text, boolean addSpecial) {
+        requireInput(text);
+        return nativeTokenize(text, addSpecial);
+    }
+
+    public synchronized int getBosToken() {
+        return nativeGetTokenBos();
+    }
+
+    public synchronized int getEosToken() {
+        return nativeGetTokenEos();
+    }
+
+    /**
      * Supporting backward-compatible names and spelling variations.
      */
     public synchronized float[] getEmbeddingWithoutNormalized(String input) {
@@ -212,6 +235,14 @@ public final class LlamaAndroid implements AutoCloseable {
     private native float[] nativeGetEmbeddings(String input);
 
     private native float[] nativeGetRawEmbeddings(String input);
+
+    private native float[] nativeGetRawEmbeddingsFromTokens(int[] tokens);
+
+    private native int[] nativeTokenize(String text, boolean addSpecial);
+
+    private native int nativeGetTokenBos();
+
+    private native int nativeGetTokenEos();
 
     private native String nativeDecode(String input, int predictLength);
 

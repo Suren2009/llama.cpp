@@ -180,6 +180,18 @@ public final class JavaApiSampleActivity extends AppCompatActivity {
             float[] embeddings = llama.getEmbeddings(prompt);
             float[] rawEmbeddings = llama.getRawEmbeddings(prompt);
 
+            // Fetch special tokens & tokenize "hi"
+            int bosToken = llama.getBosToken();
+            int eosToken = llama.getEosToken();
+            int[] hiTokens = llama.tokenize("hi", false);
+            int[] customTokens = new int[hiTokens.length + 2];
+            customTokens[0] = bosToken;
+            System.arraycopy(hiTokens, 0, customTokens, 1, hiTokens.length);
+            customTokens[customTokens.length - 1] = eosToken;
+
+            // Retrieve raw embeddings for the custom tokens array
+            float[] customRawEmbeddings = llama.getRawEmbeddings(customTokens);
+
             StringBuilder preview = new StringBuilder();
             int previewCount = Math.min(8, embeddings.length);
             for (int i = 0; i < previewCount; ++i) {
@@ -198,11 +210,19 @@ public final class JavaApiSampleActivity extends AppCompatActivity {
                 rawPreview.append(String.format(Locale.US, "%.5f", rawEmbeddings[i]));
             }
 
+            StringBuilder customTokensStr = new StringBuilder();
+            for (int t : customTokens) {
+                customTokensStr.append(t).append(" ");
+            }
+
             int dimension = embeddings.length;
             int numTokens = rawEmbeddings.length / dimension;
+            int customNumTokens = customRawEmbeddings.length / dimension;
 
             postOutput("Normalized embedding size: " + embeddings.length + "\nFirst values: [" + preview + "]\n\n" +
-                       "Raw (Unnormalized) embedding size: " + rawEmbeddings.length + " (" + numTokens + " tokens * " + dimension + " dims)\nFirst values: [" + rawPreview + "]");
+                       "Raw (Unnormalized) embedding size: " + rawEmbeddings.length + " (" + numTokens + " tokens * " + dimension + " dims)\nFirst values: [" + rawPreview + "]\n\n" +
+                       "Custom Tokens ([BOS] + 'hi' + [EOS]): [" + customTokensStr.toString().trim() + "]\n" +
+                       "Custom Raw embedding size: " + customRawEmbeddings.length + " (" + customNumTokens + " tokens * " + dimension + " dims)");
             postStatus("Embeddings complete.");
         });
     }
